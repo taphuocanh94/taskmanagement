@@ -1,0 +1,13 @@
+{
+    "loginBtn.label": "Đăng nhập",
+    "logoutBtn.label": "Đăng xuất",
+    "loggedStatus.label": "Đã đăng nhập",
+    "notLoggedStatus.label": "Chưa đăng nhập",
+    "private.workspace.label": "Không gian cá nhân",
+    "private.workspace.addNewProject.label": "Tạo dự án mới",
+    "public.workspace.label": "Không gian chung",
+    "project.shortForm.nameField.label": "Tên dự án",
+    "project.shortForm.nameField.description": "Tên dự án được hiển thị tại công khai",
+    "project.shortForm.submitBtn.label": "Tạo dự án",
+    "app.guarded.sidebar.task-management.nav-workspaces.sidebar-group-label": "Không gian làm việc"
+}

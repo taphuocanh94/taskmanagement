@@ -1,0 +1,369 @@
+// ===== Prisma Schema File =====
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// =========================================
+// ENUMS
+// =========================================
+
+enum WorkspaceType {
+  PRIVATE
+  PUBLIC
+}
+
+enum RoleScope {
+  GLOBAL
+  WORKSPACE
+  TASK
+}
+
+enum PermissionScope {
+  GLOBAL
+  WORKSPACE
+  TASK
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELED
+  REVOKED
+}
+
+enum SessionType {
+  AUTHENTICATED
+  GUEST
+  PASSWORD_RESET
+  EMAIL_VERIFY
+}
+
+// =========================================
+// MODELS
+// =========================================
+
+// ========== User ==========
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Ownerships
+  ownedWorkspaces   Workspace[] @relation("WorkspaceOwner")
+  ownedTasks        Task[]      @relation("TaskOwner")
+  createdChecklists Checklist[] @relation("ChecklistAuthor")
+
+  // Roles
+  globalRoles    UserRole[]
+  workspaceRoles UserWorkspaceRole[]
+  taskRoles      UserTaskRole[]
+
+  // Permissions
+  customPermissions UserPermission[]
+
+  // Sessions & Security
+  sessions           UserSession[]
+  passwordChangeLogs PasswordChangeLog[]
+
+  // Invitations
+  receivedInvitations Invitation[] @relation("UserReceivedInvitations")
+  sentInvitations     Invitation[] @relation("UserSentInvitations")
+
+  @@index([email])
+}
+
+// ========== Workspace ==========
+model Workspace {
+  id          String        @id @default(uuid())
+  name        String
+  description String?
+  icon        String?
+  type        WorkspaceType @default(PUBLIC)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  ownerId String
+  owner   User   @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+
+  // Hierarchy
+  parentId String?     @map("parent_id")
+  parent   Workspace?  @relation("WorkspaceHierarchy", fields: [parentId], references: [id])
+  children Workspace[] @relation("WorkspaceHierarchy")
+
+  // Relations
+  tasks       Task[]  @relation("Workspace")
+  userRoles   UserWorkspaceRole[]
+  invitations Invitation[]        @relation("WorkspaceInvitations")
+
+  taskStages WorkspaceTaskStage[]
+
+  @@index([ownerId])
+  @@index([name])
+}
+
+// ========== Task ==========
+model Task {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId String
+  owner   User   @relation("TaskOwner", fields: [ownerId], references: [id])
+
+  // Hierarchy
+  rootId   String? @map("root_id")
+  root     Task?   @relation("TaskRoot", fields: [rootId], references: [id])
+  subTasks Task[]  @relation("TaskRoot")
+
+  parentId String? @map("parent_id")
+  parent   Task?   @relation("TaskHierarchy", fields: [parentId], references: [id])
+  children Task[]  @relation("TaskHierarchy")
+
+  stageId String?    @map("stage_id")
+  stage   TaskStage? @relation("TaskStage", fields: [stageId], references: [id])
+
+  workspaceId String    @map("workspace_id")
+  workspace   Workspace @relation("Workspace", fields: [workspaceId], references: [id])
+
+  checklistItems Checklist[]
+
+  // Relations
+  userRoles   UserTaskRole[]
+  invitations Invitation[]   @relation("TaskInvitations")
+
+  @@index([ownerId])
+  @@index([title])
+}
+
+// ========== TaskStage ==========
+model TaskStage {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tasks Task[] @relation("TaskStage")
+  workspaces WorkspaceTaskStage[]
+
+  @@index([name])
+}
+
+model WorkspaceTaskStage {
+  workspaceId       String    @map("workspace_id")
+  taskStageId       String    @map("task_stage_id")
+
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id])
+  taskStage       TaskStage        @relation(fields: [taskStageId], references: [id])
+
+  @@id([workspaceId, taskStageId])
+}
+
+// ========== Checklist ==========
+model Checklist {
+  id          String   @id @default(uuid())
+  taskId      String   @map("task_id")
+  title       String
+  description String?
+  result      String?
+  isChecked   Boolean  @default(false)
+  authorId    String   @map("author_id")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  task   Task @relation(fields: [taskId], references: [id])
+  author User @relation("ChecklistAuthor", fields: [authorId], references: [id])
+
+  @@index([taskId])
+}
+
+// ========== Role ==========
+model Role {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  scope       RoleScope @default(GLOBAL)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  globalUserRoles    UserRole[]
+  workspaceUserRoles UserWorkspaceRole[]
+  taskUserRoles      UserTaskRole[]
+  rolePermissions    RolePermission[]
+  invitations        Invitation[]
+
+  @@unique([name, scope], name: "Role_Scope")
+  @@index([scope])
+}
+
+// ========== Permission ==========
+model Permission {
+  id          String          @id @default(uuid())
+  name        String
+  description String?
+  scope       PermissionScope @default(GLOBAL)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  roles RolePermission[]
+  users UserPermission[]
+
+  @@unique([name, scope], name: "Permission_Scope")
+  @@index([scope])
+}
+
+// ========== Invitation ==========
+model Invitation {
+  id          String           @id @default(uuid())
+  userId      String           @map("user_id")
+  roleId      String           @map("role_id")
+  workspaceId String?          @map("workspace_id")
+  taskId      String?          @map("task_id")
+  status      InvitationStatus @default(PENDING)
+  invitedAt   DateTime         @default(now())
+  processedAt DateTime?
+  createdById String           @map("created_by")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  user      User       @relation("UserReceivedInvitations", fields: [userId], references: [id])
+  role      Role       @relation(fields: [roleId], references: [id])
+  workspace Workspace? @relation("WorkspaceInvitations", fields: [workspaceId], references: [id])
+  task      Task?      @relation("TaskInvitations", fields: [taskId], references: [id])
+  createdBy User       @relation("UserSentInvitations", fields: [createdById], references: [id])
+
+  globalUserRoles    UserRole[]          @relation("InvitationGlobalRoles")
+  workspaceUserRoles UserWorkspaceRole[] @relation("InvitationWorkspaceRoles")
+  taskUserRoles      UserTaskRole[]      @relation("InvitationTaskRoles")
+
+  @@unique([userId, roleId, workspaceId, taskId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+// // ========== WorkspaceTask ==========
+// model WorkspaceTask {
+//   workspaceId String   @map("workspace_id")
+//   taskId      String   @map("task_id")
+//   createdAt   DateTime @default(now())
+
+//   workspace Workspace @relation(fields: [workspaceId], references: [id])
+//   task      Task      @relation(fields: [taskId], references: [id])
+
+//   @@id([workspaceId, taskId])
+// }
+
+// ========== UserRole ==========
+model UserRole {
+  userId       String    @map("user_id")
+  roleId       String    @map("role_id")
+  assignedAt   DateTime  @default(now())
+  joinedAt     DateTime?
+  invitationId String?   @map("invitation_id")
+
+  user       User        @relation(fields: [userId], references: [id])
+  role       Role        @relation(fields: [roleId], references: [id])
+  invitation Invitation? @relation("InvitationGlobalRoles", fields: [invitationId], references: [id])
+
+  @@id([userId, roleId])
+}
+
+// ========== UserWorkspaceRole ==========
+model UserWorkspaceRole {
+  userId       String    @map("user_id")
+  workspaceId  String    @map("workspace_id")
+  roleId       String    @map("role_id")
+  assignedAt   DateTime  @default(now())
+  joinedAt     DateTime?
+  invitationId String?   @map("invitation_id")
+
+  user       User        @relation(fields: [userId], references: [id])
+  workspace  Workspace   @relation(fields: [workspaceId], references: [id])
+  role       Role        @relation(fields: [roleId], references: [id])
+  invitation Invitation? @relation("InvitationWorkspaceRoles", fields: [invitationId], references: [id])
+
+  @@id([userId, workspaceId, roleId])
+}
+
+// ========== UserTaskRole ==========
+model UserTaskRole {
+  userId       String    @map("user_id")
+  taskId       String    @map("task_id")
+  roleId       String    @map("role_id")
+  assignedAt   DateTime  @default(now())
+  joinedAt     DateTime?
+  invitationId String?   @map("invitation_id")
+
+  user       User        @relation(fields: [userId], references: [id])
+  task       Task        @relation(fields: [taskId], references: [id])
+  role       Role        @relation(fields: [roleId], references: [id])
+  invitation Invitation? @relation("InvitationTaskRoles", fields: [invitationId], references: [id])
+
+  @@id([userId, taskId, roleId])
+}
+
+// ========== RolePermission ==========
+model RolePermission {
+  roleId       String   @map("role_id")
+  permissionId String   @map("permission_id")
+  assignedAt   DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+  @@unique([roleId, permissionId], name: "Role_Permission")
+}
+
+// ========== UserPermission ==========
+model UserPermission {
+  userId       String   @map("user_id")
+  permissionId String   @map("permission_id")
+  assignedAt   DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([userId, permissionId])
+}
+
+// ========== UserSession ==========
+model UserSession {
+  id          String      @id @default(uuid())
+  userId      String?
+  user        User?       @relation(fields: [userId], references: [id])
+  sessionType SessionType @default(GUEST)
+  userAgent   String?
+  ipAddress   String?
+  revoked     Boolean     @default(false)
+  rememberMe  Boolean     @default(false)
+  expiresAt   DateTime
+  createdAt   DateTime    @default(now())
+
+  @@index([userId])
+}
+
+// ========== PasswordChangeLog ==========
+model PasswordChangeLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  changedAt DateTime @default(now())
+  ipAddress String?
+  userAgent String?
+
+  @@index([userId])
+}
